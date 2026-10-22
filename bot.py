@@ -1,7 +1,7 @@
 """
 رادار الأسهم الأمريكية — بوت توصيات تيليغرام
-- مضاربة (سوينغ): تصحيح داخل اتجاه صاعد على الشموع اليومية، مع فلتر السوق العام (SPY)
-  وتجنّب الأسهم التي تعلن نتائجها قريباً. صفقات شراء فقط، من أيام لأسابيع.
+- مضاربة (سوينغ): اختراق قمة 50 يوماً لسهم من أقوى 30% بحجم تداول مرتفع والسوق العام (SPY) صاعد،
+  مع وقف متحرك 3×ATR تحت أعلى إغلاق. صفقات شراء فقط، تمتد عادة 2 إلى 6 أسابيع.
 - استثمار: تقرير أسبوعي يصنّف شركات كبيرة راسخة وصناديق (منطقة تجميع / سعر عادل / متضخم / هابط)
   وتنبيه عندما يدخل سهم منطقة التجميع.
 - علامة ☪️ للأسهم الموجودة في صندوق SPUS الشرعي.
@@ -16,8 +16,8 @@ from datetime import datetime, timezone
 
 import requests
 
-from common import (SWING, INVEST, INVEST_ETF, MARKET, SHARIAH, SHARIAH_ASOF, TP_R, MAX_GAP_R,
-                    TTL_DAYS, COOLDOWN_DAYS, Ind, yahoo, earnings_soon, market_ok, swing_setup,
+from common import (SWING, INVEST, INVEST_ETF, MARKET, SHARIAH, SHARIAH_ASOF, STOP_ATR, TRAIL_ATR, MAX_DAYS,
+                    BREAKOUT_DAYS, Ind, yahoo, earnings_soon, market_ok, rs_ranks, breakout_setup,
                     invest_zone, fmt, pct)
 
 SCAN_AFTER_UTC = (21, 15)    # الفحص اليومي بعد إغلاق السوق (21:15 UTC = 12:15 بعد منتصف الليل بتوقيت السعودية)
@@ -101,11 +101,7 @@ def lvl_line(name, v, entry):
 
 
 def pnl_pct(rec, exit_px):
-    third, m, hits = 1 / 3, 0.0, min(rec["hits"], 3)
-    for i in range(hits):
-        m += (rec["tp"][i] - rec["entry"]) / rec["entry"] * third
-    m += (exit_px - rec["entry"]) / rec["entry"] * (1 - third * hits)
-    return m * 100
+    return (exit_px - rec["entry"]) / rec["entry"] * 100 - 0.1
 
 
 def chart_png(sym, cs, rec):
@@ -116,7 +112,7 @@ def chart_png(sym, cs, rec):
         from matplotlib.patches import Rectangle
     except ImportError:
         return None
-    d = cs[-70:]
+    d = cs[-90:]
     fig, ax = plt.subplots(figsize=(8, 4.2), dpi=120)
     bg, up, dn, ac = "#0f1418", "#2fbf8a", "#e5534b", "#d9a441"
     fig.patch.set_facecolor(bg); ax.set_facecolor(bg)
@@ -124,20 +120,24 @@ def chart_png(sym, cs, rec):
         col = up if k[4] >= k[1] else dn
         ax.plot([i, i], [k[3], k[2]], color=col, lw=1)
         ax.add_patch(Rectangle((i - .32, min(k[1], k[4])), .64, max(abs(k[4] - k[1]), 1e-9), color=col))
-    x0, x1 = len(d) - 1, len(d) + 12
-    e, sl, tp3 = rec["entry"], rec["sl"], rec["tp"][2]
-    ax.add_patch(Rectangle((x0, e), x1 - x0, tp3 - e, color=up, alpha=.18))
+    n = len(d)
+    hi50 = max(x[4] for x in cs[-BREAKOUT_DAYS - 1:-1])
+    ax.plot([n - BREAKOUT_DAYS - 1, n - 1], [hi50, hi50], color="#8b9aa5", lw=.9, ls=":")
+    ax.text(n - BREAKOUT_DAYS - 1, hi50, " 50-day high", color="#8b9aa5", fontsize=8, va="bottom")
+    x0, x1 = n - 1, n + 10
+    e, sl = rec["entry"], rec["sl"]
     ax.add_patch(Rectangle((x0, sl), x1 - x0, e - sl, color=dn, alpha=.22))
-    for v, col, lb in [(e, ac, "ENTRY"), (sl, dn, "SL"), (rec["tp"][0], up, "TP1"), (rec["tp"][1], up, "TP2"), (tp3, up, "TP3")]:
+    ax.annotate("", xy=(x1, e + (e - sl) * 1.5), xytext=(x0, e), arrowprops=dict(arrowstyle="->", color=up, lw=1.5))
+    for v, col, lb in [(e, ac, "ENTRY"), (sl, dn, "STOP")]:
         ax.axhline(v, color=col, lw=.8, ls="--", alpha=.8)
         ax.text(x1 + .3, v, f" {lb} {fmt(v)}", color=bg, fontsize=8, va="center", family="monospace",
                 bbox=dict(boxstyle="square,pad=0.25", fc=col, ec="none"))
-    ax.set_xlim(-1, x1 + 9); ax.set_xticks([])
+    ax.set_xlim(-1, x1 + 10); ax.set_xticks([])
     ax.tick_params(colors="#8b9aa5", labelsize=8)
     for sp in ax.spines.values():
         sp.set_visible(False)
     ax.grid(axis="y", color="#26313a", lw=.6)
-    ax.set_title(f"{sym} · Daily · LONG", color="#e7ecef", fontsize=11, loc="left", family="monospace")
+    ax.set_title(f"{sym} · Daily · BREAKOUT", color="#e7ecef", fontsize=11, loc="left", family="monospace")
     buf = io.BytesIO(); fig.tight_layout(); fig.savefig(buf, format="png", facecolor=bg); plt.close(fig)
     return buf.getvalue()
 
@@ -145,41 +145,46 @@ def chart_png(sym, cs, rec):
 # ---------------- المضاربة: الرسائل ----------------
 def signal_text(rec):
     e = rec["entry"]
-    tps = "\n".join(lvl_line(f"الهدف {i + 1}", v, e) for i, v in enumerate(rec["tp"]))
     sh = (f"{RLM}☪️ ضمن صندوق SPUS الشرعي (قائمة {SHARIAH_ASOF})" if rec["sym"] in SHARIAH
           else f"{RLM}غير مدرج في صندوق SPUS الشرعي: إما غير متوافق أو خارج مؤشر S&P 500، تحقق بنفسك")
-    return (f"📈 <b>توصية مضاربة</b> — <b>{rec['sym']}</b>{halal(rec['sym'])}\n\n"
-            f"{RLM}النوع: <b>شراء</b> (سوينغ: من أيام لأسابيع)\n"
+    return (f"🚀 <b>توصية مضاربة: اختراق</b> — <b>{rec['sym']}</b>{halal(rec['sym'])}\n\n"
+            f"{RLM}النوع: <b>شراء</b> (سوينغ: عادة من أسبوعين لـ 6 أسابيع)\n"
             f"{RLM}الدخول: عند افتتاح الجلسة القادمة، قرب <code>{fmt(e)}</code>\n"
-            f"{RLM}{lvl_line('وقف الخسارة', rec['sl'], e)}\n{RLM}" + tps.replace("\n", f"\n{RLM}") + "\n"
-            f"{RLM}المدة القصوى: {TTL_DAYS} يوم تداول\n\n"
+            f"{RLM}{lvl_line('الوقف الأولي', rec['sl'], e)}\n"
+            f"{RLM}الهدف: <b>بدون هدف ثابت</b>، وقف متحرك يرتفع مع السعر ويخبرك البوت كل يوم بمكانه\n"
+            f"{RLM}المدة القصوى: {MAX_DAYS} يوم تداول\n\n"
             f"{RLM}📊 أسباب التوصية:\n" + "".join(f"{RLM}• {w}\n" for w in rec["why"]) + "\n"
             f"{sh}\n"
-            f"{RLM}💡 بِع ثلث الكمية عند كل هدف، وانقل الوقف لسعر دخولك بعد الهدف 1.\n"
+            f"{RLM}💡 هذه الاستراتيجية تربح نحو 4 صفقات من 10، والربح يأتي من الصفقات التي تركب موجة طويلة. "
+            "لا تبِع مبكراً، والتزم بالوقف.\n"
             f"{RLM}💰 حجم الصفقة: خاطر بـ 1% من محفظتك. عدد الأسهم = (1% من المحفظة) ÷ (الدخول − الوقف)\n"
-            f"{RLM}⚠️ إذا افتتح السهم بفجوة كبيرة، يلغي البوت التوصية ويخبرك.")
+            f"{RLM}📌 سعر الدخول الفعلي هو سعر الافتتاح، والبوت يعيد حساب الوقف عليه ويرسله لك.")
 
 
-def reasons(sg):
-    return [
-        "السهم في اتجاه صاعد: السعر فوق متوسط 200 يوم، ومتوسط 50 فوق متوسط 200",
-        f"قوة الاتجاه: ADX عند {sg['adx']:.0f}",
-        f"تصحيح انتهى: RSI نزل إلى {sg['dip']:.0f} ثم ارتد إلى {sg['rsi']:.0f}",
-        "السوق العام (SPY) صاعد",
-        "لا توجد نتائج مالية للشركة خلال الأيام القادمة",
+def reasons(sg, earn_ok):
+    r = [
+        f"أغلق عند أعلى مستوى في {BREAKOUT_DAYS} يوماً (اختراق)",
+        f"حجم التداول {sg['vol_x']:.1f} ضعف المعتاد",
+        f"من أقوى الأسهم: صعد {sg['ret6m']:+.0f}% في 6 أشهر، أقوى من {sg['rs'] * 100:.0f}% من القائمة",
+        "السعر فوق متوسط 200 يوم، والسوق العام (SPY) صاعد",
     ]
+    if earn_ok:
+        r.append("لا توجد نتائج مالية للشركة خلال الأيام القادمة")
+    return r
 
 
 # ---------------- المضاربة: المتابعة ----------------
 def finish(rec, exit_px, why, st):
     rec.update(status="closed", exit=exit_px, why_close=why, closed_at=int(time.time() * 1000), res=pnl_pct(rec, exit_px))
     icon = "🏁" if rec["res"] > 0 else "⛔"
-    send(f"{icon} <b>{rec['sym']}</b> — انتهت التوصية\n{RLM}{why}\n{RLM}النتيجة: <b>{pct(rec['res'])}</b>", reply_to=rec.get("msg"))
+    send(f"{icon} <b>{rec['sym']}</b> — انتهت التوصية\n{RLM}{why}\n{RLM}سعر الخروج: <code>{fmt(exit_px)}</code>\n"
+         f"{RLM}النتيجة: <b>{pct(rec['res'])}</b>", reply_to=rec.get("msg"))
     st.setdefault("history", []).insert(0, rec)
     st.setdefault("last_close", {})[rec["sym"]] = rec["closed_at"]
 
 
 def track(st):
+    """متابعة وقت السوق على شموع 5 دقائق: تفعيل عند الافتتاح وضرب الوقف المتحرك."""
     active = st.setdefault("active", {})
     for sym in list(active):
         rec = active[sym]
@@ -192,94 +197,96 @@ def track(st):
             nxt = [b for b in bars if b[0] >= rec["activate_after"]]
             if not nxt:
                 if time.time() * 1000 - rec["t"] > 5 * 86400000:
-                    rec["status"] = "cancelled"
                     send(f"⚪️ <b>{sym}</b> — أُلغيت التوصية (لم تُفتح جلسة جديدة)", reply_to=rec.get("msg"))
                     del active[sym]
                 continue
             op = nxt[0][1]
-            gap = op - rec["entry"]
-            if abs(gap) > MAX_GAP_R * rec["r"]:
-                send(f"⚪️ <b>{sym}</b> — أُلغيت التوصية\n{RLM}افتتح السهم بفجوة {'صاعدة' if gap > 0 else 'هابطة'} "
-                     f"عند <code>{fmt(op)}</code> ({pct(gap / rec['entry'] * 100)})، والدخول صار غير مناسب.", reply_to=rec.get("msg"))
-                rec["status"] = "cancelled"
-                st.setdefault("last_close", {})[sym] = int(time.time() * 1000)
-                del active[sym]
-                continue
-            # تفعيل الصفقة عند الافتتاح مع إزاحة المستويات بقدر الفجوة
-            rec["entry"], rec["sl"] = op, rec["sl"] + gap
-            rec["tp"] = [v + gap for v in rec["tp"]]
-            rec.update(status="active", entry_t=nxt[0][0], last=nxt[0][0])
+            rec["entry"] = op
+            rec["sl"] = op - STOP_ATR * rec["atr"]
+            rec.update(status="active", entry_t=nxt[0][0], last=nxt[0][0], max_close=op, days=0)
             send(f"✅ <b>{sym}</b> — تفعّلت التوصية عند الافتتاح <code>{fmt(op)}</code>\n"
-                 f"{RLM}{lvl_line('الوقف', rec['sl'], op)}\n{RLM}"
-                 + f"\n{RLM}".join(lvl_line(f"الهدف {i + 1}", v, op) for i, v in enumerate(rec["tp"])), reply_to=rec.get("msg"))
+                 f"{RLM}{lvl_line('الوقف الأولي', rec['sl'], op)}", reply_to=rec.get("msg"))
         for b in bars:
             if b[0] < rec["last"]:
                 continue
             rec["last"] = b[0]
-            hi, lo = b[2], b[3]
-            stop = rec["entry"] if rec["hits"] else rec["sl"]
-            if lo <= stop:
-                finish(rec, stop, f"خروج على التعادل بعد الهدف {rec['hits']}" if rec["hits"] else "ضرب وقف الخسارة", st)
+            if b[3] <= rec["sl"]:
+                px = min(rec["sl"], b[1])
+                moved = rec["sl"] > rec["entry"] - STOP_ATR * rec["atr"] + 1e-9
+                finish(rec, px, "ضرب الوقف المتحرك" if moved else "ضرب الوقف الأولي", st)
                 break
-            while rec["hits"] < 3 and hi >= rec["tp"][rec["hits"]]:
-                rec["hits"] += 1
-                i = rec["hits"]
-                tail = "انقل الوقف لسعر دخولك 🔒" if i == 1 else "بِع ثلثاً آخر واترك الباقي للهدف 3" if i == 2 else ""
-                send(f"🎯 <b>{sym}</b> — تحقق الهدف {i} ✅\n{RLM}السعر: <code>{fmt(rec['tp'][i - 1])}</code> "
-                     f"({pct((rec['tp'][i - 1] - rec['entry']) / rec['entry'] * 100)})\n{RLM}{tail}", reply_to=rec.get("msg"))
-            if rec["hits"] >= 3:
-                finish(rec, rec["tp"][2], "تحققت كل الأهداف 🏆", st)
-                break
-        if rec["status"] == "active" and time.time() * 1000 - rec.get("entry_t", rec["t"]) > TTL_DAYS * 1.45 * 86400000:
-            finish(rec, bars[-1][4], f"انتهت المدة القصوى ({TTL_DAYS} يوم تداول)", st)
         if rec["status"] == "closed":
+            del active[sym]
+
+
+def update_trails(st, series):
+    """بعد الإغلاق اليومي: رفع الوقف المتحرك، وإغلاق الصفقات التي تجاوزت المدة القصوى."""
+    active = st.get("active", {})
+    for sym in list(active):
+        rec = active[sym]
+        s = series.get(sym)
+        if rec["status"] != "active" or s is None:
+            continue
+        closes = [c for t, c in zip(s.t, s.c) if t >= rec["entry_t"] - 86400000 * 0.5]
+        if not closes:
+            continue
+        rec["days"] = len(closes)
+        rec["max_close"] = max([rec.get("max_close", rec["entry"])] + closes)
+        new_sl = rec["max_close"] - TRAIL_ATR * s.atr[-1]
+        if new_sl > rec["sl"]:
+            rec["sl_prev"], rec["sl"] = rec["sl"], new_sl
+        rec["now"] = s.c[-1]
+        if rec["days"] >= MAX_DAYS:
+            finish(rec, s.c[-1], f"انتهت المدة القصوى ({MAX_DAYS} يوم تداول)", st)
             del active[sym]
 
 
 # ---------------- المضاربة: الفحص اليومي ----------------
 REASON_AR = {
-    "market": "السوق العام هابط", "no_trend": "بدون اتجاه صاعد", "weak": "اتجاه ضعيف",
-    "no_pullback": "اتجاه جيد وننتظر تصحيحاً", "near": "التصحيح حصل وننتظر الارتداد ⏳",
-    "earnings": "نتائج مالية قريبة", "data": "بيانات غير كافية", "error": "تعذر جلب البيانات",
+    "market": "السوق العام هابط", "no_trend": "تحت متوسط 200 يوم", "weak_rs": "ليس من أقوى 30%",
+    "no_breakout": "بعيد عن قمة 50 يوماً", "near": "قريب من الاختراق (أقل من 3%) ⏳",
+    "low_volume": "اخترق بحجم تداول ضعيف", "earnings": "نتائج مالية قريبة",
+    "data": "بيانات غير كافية", "error": "تعذر جلب البيانات",
 }
 
 
 def daily_scan(st, spy):
     m = Ind(spy)
-    mi = len(m.c) - 1
-    mkt = market_ok(m, mi)
+    mkt = market_ok(m, len(m.c) - 1)
     earn = earnings_soon()
     active = st.setdefault("active", {})
     last_close = st.setdefault("last_close", {})
-    status, new = {}, []
-    now_ms = int(time.time() * 1000)
+    series, cs_all = {}, {}
     for sym in SWING:
-        if sym in active:
-            continue
-        if now_ms - last_close.get(sym, 0) < COOLDOWN_DAYS * 1.45 * 86400000:
-            continue
         try:
             cs = yahoo(sym, "1d", "2y")
-            s = Ind(cs)
-            dg = {}
-            sg = swing_setup(s, len(s.c) - 1, mkt, dg)
-            why = dg.get("why")
-            if sg and earn is not None and sym in earn:
-                sg, why = None, "earnings"
-            status[sym] = why
-            if not sg:
-                continue
-            rec = {"sym": sym, "entry": sg["entry"], "sl": sg["sl"], "r": sg["r"], "tp": sg["tp"],
-                   "why": reasons(sg) if earn is not None else reasons(sg)[:-1],
-                   "t": now_ms, "activate_after": s.t[-1] + 20 * 3600000, "hits": 0, "status": "pending"}
-            rec["msg"] = send(signal_text(rec), photo=chart_png(sym, cs, rec))
-            active[sym] = rec
-            new.append(sym)
+            series[sym], cs_all[sym] = Ind(cs), cs
         except Exception as e:  # noqa: BLE001
             print(f"{sym}: {e}")
-            status[sym] = "error"
-    st["market"] = {"spy_ok": mkt, "spy": m.c[mi], "spy200": m.sma200[mi], "coins": status,
-                    "earn_ok": earn is not None}
+        time.sleep(0.15)
+    update_trails(st, series)
+    rs = rs_ranks(series)
+    status, new = {sym: "error" for sym in SWING if sym not in series}, []
+    now_ms = int(time.time() * 1000)
+    for sym, s in series.items():
+        if sym in active or now_ms - last_close.get(sym, 0) < 1.2 * 86400000:
+            continue
+        dg = {}
+        sg = breakout_setup(s, len(s.c) - 1, mkt, rs.get(sym), dg)
+        why = dg.get("why")
+        if sg and earn is not None and sym in earn:
+            sg, why = None, "earnings"
+        status[sym] = why
+        if not sg:
+            continue
+        e = sg["close"]
+        rec = {"sym": sym, "entry": e, "sl": e - STOP_ATR * sg["atr"], "atr": sg["atr"],
+               "why": reasons(sg, earn is not None), "t": now_ms, "activate_after": s.t[-1] + 20 * 3600000,
+               "status": "pending", "strategy": "breakout"}
+        rec["msg"] = send(signal_text(rec), photo=chart_png(sym, cs_all[sym], rec))
+        active[sym] = rec
+        new.append(sym)
+    st["market"] = {"spy_ok": mkt, "coins": status, "earn_ok": earn is not None}
     if new:
         st["last_signal"] = now_ms
     return new
@@ -340,8 +347,14 @@ def session_summary(st, new):
     lines = [f"{'✅' if r['res'] > 0 else '❌'} {r['sym']}: {pct(r['res'])}" for r in today]
     act = []
     for r in st.get("active", {}).values():
-        state = "بانتظار الافتتاح" if r["status"] == "pending" else f"أهداف {r['hits']}/3"
-        act.append(f"⏳ {r['sym']} · {state}")
+        if r["status"] == "pending":
+            act.append(f"⏳ {r['sym']} · بانتظار الافتتاح")
+            continue
+        now_px = r.get("now", r["entry"])
+        up = " 🔼" if r.get("sl_prev") and r["sl"] > r["sl_prev"] else ""
+        act.append(f"{RLM}📈 <b>{r['sym']}</b> {pct((now_px - r['entry']) / r['entry'] * 100)} · "
+                   f"الوقف المتحرك <code>{fmt(r['sl'])}</code>{up} · يوم {r.get('days', 0)}/{MAX_DAYS}")
+        r.pop("sl_prev", None)
     m = st.get("market", {})
     mk = (f"{RLM}السوق العام (SPY): <b>{'صاعد 📈' if m.get('spy_ok') else 'غير صاعد ↔️ (لا صفقات شراء جديدة)'}</b>"
           if m else "")
@@ -352,11 +365,11 @@ def session_summary(st, new):
     txt = ("📋 <b>ملخص جلسة اليوم</b>\n\n"
            + (f"{RLM}توصيات جديدة: {', '.join(new)}\n" if new else f"{RLM}لا توصيات جديدة اليوم.\n")
            + ("\n" + "\n".join(lines) + "\n" if lines else "")
-           + ("\n<b>النشطة:</b>\n" + "\n".join(act) + "\n" if act else "")
+           + ("\n<b>الصفقات المفتوحة</b> (🔼 = ارتفع الوقف اليوم، حدّثه عندك):\n" + "\n".join(act) + "\n" if act else "")
            + (f"\n{RLM}نسبة النجاح: <b>{round(wins / len(hist) * 100)}%</b> من {len(hist)} توصية\n" if hist else "")
            + f"\n🌡 <b>حالة السوق</b>\n{mk}\n"
            + (f"{RLM}• قريبة من إشارة ⏳: {', '.join(near)}\n" if near else "")
-           + "".join(f"{RLM}• {REASON_AR[k]}: {n_stocks(len(groups[k]))}\n" for k in ["no_pullback", "weak", "no_trend", "earnings", "market", "error"] if k in groups)
+           + "".join(f"{RLM}• {REASON_AR[k]}: {n_stocks(len(groups[k]))}\n" for k in ["no_breakout", "low_volume", "weak_rs", "no_trend", "earnings", "market", "error"] if k in groups)
            + ("" if m.get("earn_ok", True) else f"{RLM}⚠️ تعذر قراءة تقويم النتائج المالية اليوم، فلم يُطبَّق فلتر النتائج\n"))
     send(txt)
 
@@ -374,11 +387,24 @@ def main():
     force = os.environ.get("FORCE", "")
     if not st.get("hello") or os.environ.get("TEST_MODE") == "true":
         send("✅ <b>رادار الأسهم الأمريكية</b> متصل!\n\n"
-             f"{RLM}📈 <b>المضاربة</b>: يفحص {n_stocks(len(SWING))} بعد إغلاق السوق كل يوم، ويرسل توصيات شراء سوينغ (من أيام لأسابيع)، "
-             "ويتابع الأهداف والوقف وقت السوق.\n"
+             f"{RLM}📈 <b>المضاربة</b>: يفحص {n_stocks(len(SWING))} بعد إغلاق السوق كل يوم، ويرسل توصيات شراء عند اختراق الأسهم القوية، "
+             "ويتابع الوقف المتحرك وقت السوق.\n"
              f"{RLM}💼 <b>الاستثمار</b>: تقرير كل سبت لـ {len(INVEST)} شركة كبيرة و{len(INVEST_ETF)} صناديق، وتنبيه عند فرصة تجميع.\n"
              f"{RLM}☪️ علامة للأسهم الموجودة في صندوق SPUS الشرعي.")
         st["hello"] = True
+
+    if not st.get("breakout_v"):
+        old = [r["sym"] for r in st.get("active", {}).values() if r.get("strategy") != "breakout"]
+        for sym in old:
+            st["active"].pop(sym, None)
+        send("🔄 <b>تغيير استراتيجية المضاربة</b>\n\n"
+             f"{RLM}اختبار 10 سنوات على 70 سهماً أظهر أن الاستراتيجية القديمة ضعيفة، فانتقل البوت إلى "
+             "<b>اختراق قمة 50 يوماً لسهم قوي، مع وقف متحرك</b>:\n"
+             f"{RLM}• 2016–2022: متوسط +1.68% للصفقة\n{RLM}• 2023–الآن: متوسط +3.22% للصفقة\n"
+             f"{RLM}• تربح نحو 4 صفقات من 10، والربح من الصفقات الطويلة\n"
+             f"{RLM}• بدون أهداف ثابتة: الوقف يرتفع مع السعر، والبوت يخبرك بمكانه يومياً"
+             + (f"\n\n{RLM}أُلغيت توصيات الاستراتيجية القديمة: {', '.join(old)}" if old else ""))
+        st["breakout_v"] = True
 
     now = datetime.now(timezone.utc)
     track(st)

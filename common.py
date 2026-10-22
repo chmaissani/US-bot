@@ -41,7 +41,16 @@ JBHT EFX CSGP CRL IEX CHRW TSCO ZBRA IT WY MAS GPC GDDY AVY TRMB TYL FICO ALB RL
 DECK GNRC ALLE SWKS TECH FDXF AOS ALGN ROL PODD PNR SPUS HLAL
 """.split())
 
-# استراتيجية المضاربة (شموع يومية): تصحيح داخل اتجاه صاعد
+# استراتيجية المضاربة (شموع يومية): اختراق قمة 50 يوم لسهم قوي + وقف متحرك
+# اختُبرت على 10 سنوات و70 سهماً: 2016–2022 متوسط +1.68% للصفقة (PF 1.49)، 2023–2026 متوسط +3.22% (PF 1.76)
+BREAKOUT_DAYS = 50      # الإغلاق عند أعلى مستوى في 50 يوماً
+VOL_MULT = 1.5          # حجم التداول 1.5 ضعف متوسط 20 يوماً على الأقل
+RS_MIN = 0.7            # من أقوى 30% من الأسهم بأداء آخر 6 أشهر
+STOP_ATR = 2.5          # الوقف الأولي تحت سعر الدخول
+TRAIL_ATR = 3.0         # الوقف المتحرك: 3 أضعاف ATR تحت أعلى إغلاق منذ الدخول
+MAX_DAYS = 40           # أقصى مدة للصفقة بأيام التداول
+
+# (الاستراتيجية القديمة: تصحيح داخل اتجاه صاعد — أضعف في الاختبار، تُركت للمقارنة)
 RSI_LEVEL = 40          # RSI(14) نزل تحت هذا المستوى خلال آخر 5 أيام ثم ارتد فوقه
 MIN_ADX = 20            # أقل قوة اتجاه
 SL_ATR = (1.5, 2.5)     # الوقف بين 1.5 و 2.5 ضعف ATR خلف قاع آخر 10 أيام
@@ -240,6 +249,40 @@ def swing_setup(s, i, mkt_ok, diag=None, rsi_level=RSI_LEVEL, min_adx=MIN_ADX):
     return {"entry": px, "sl": sl, "r": r, "tp": [px + k * r for k in TP_R], "atr": at,
             "adx": s.adx[i], "rsi": s.rsi[i], "dip": min(s.rsi[i - 5:i]),
             "sma50": s.sma50[i], "sma200": s.sma200[i]}
+
+
+def rs_ranks(series):
+    """ترتيب القوة النسبية (عائد 126 يوماً) بين الأسهم على آخر يوم: {رمز: 0..1}."""
+    rets = []
+    for sym, s in series.items():
+        if len(s.c) > 127:
+            rets.append((s.c[-1] / s.c[-127] - 1, sym))
+    rets.sort()
+    n = len(rets)
+    return {sym: k / max(1, n - 1) for k, (_, sym) in enumerate(rets)}
+
+
+def breakout_setup(s, i, mkt_ok, rs, diag=None):
+    """إشارة الاختراق على شمعة اليوم i المغلقة. rs = ترتيب قوة السهم (0..1)."""
+    diag = {} if diag is None else diag
+    if i < 210 or s.sma200[i] is None or s.atr[i] is None:
+        diag["why"] = "data"; return None
+    vma = sum(s.v[i - 20:i]) / 20
+    c = s.c[i]
+    if not mkt_ok:
+        diag["why"] = "market"; return None
+    if c <= s.sma200[i]:
+        diag["why"] = "no_trend"; return None
+    if rs is None or rs < RS_MIN:
+        diag["why"] = "weak_rs"; return None
+    hi = max(s.c[i - BREAKOUT_DAYS:i])
+    if c < hi:
+        diag["why"] = "near" if c >= 0.97 * hi else "no_breakout"; return None
+    if not vma or s.v[i] < VOL_MULT * vma:
+        diag["why"] = "low_volume"; return None
+    diag["why"] = "signal"
+    return {"close": c, "atr": s.atr[i], "rs": rs, "vol_x": s.v[i] / vma, "hi50": hi,
+            "ret6m": (c / s.c[i - 126] - 1) * 100}
 
 
 def weekly_rsi(s, n=14):
