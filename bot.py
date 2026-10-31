@@ -241,6 +241,42 @@ def update_trails(st, series):
             del active[sym]
 
 
+AR_DAYS = ["الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت", "الأحد"]
+AR_MONTHS = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"]
+EARN_WARN_DAYS = 4   # التنبيه قبل النتائج بهذا العدد من الأيام (يغطي عطلة نهاية الأسبوع)
+
+
+def earnings_warnings(st, earn):
+    """تنبيه مرة واحدة لكل صفقة مفتوحة إذا اقتربت نتائج الشركة المالية."""
+    if not earn:
+        return
+    today = datetime.now(timezone.utc).date()
+    for sym, rec in st.get("active", {}).items():
+        if sym not in earn or rec.get("earn_warned") == earn[sym][0]:
+            continue
+        day, when = earn[sym]
+        d = datetime.strptime(day, "%Y-%m-%d").date()
+        left = (d - today).days
+        if left > EARN_WARN_DAYS:
+            continue
+        rec["earn_warned"] = day
+        when_ar = {"pre": "قبل افتتاح السوق", "after": "بعد إغلاق السوق"}.get(when, "")
+        last_chance = ("آخر فرصة للتصرف: إغلاق الجلسة التي قبله" if when == "pre"
+                       else "آخر فرصة للتصرف: قبل إغلاق نفس اليوم" if when == "after" else "")
+        now_px = rec.get("now", rec["entry"])
+        send(f"⚠️ <b>{sym}</b> — نتائج مالية قريبة\n\n"
+             f"{RLM}الشركة تعلن نتائجها يوم <b>{AR_DAYS[d.weekday()]} {d.day} {AR_MONTHS[d.month - 1]}</b> {when_ar}\n"
+             + (f"{RLM}{last_chance}\n" if last_chance else "") +
+             f"{RLM}صفقتك الآن: {pct((now_px - rec['entry']) / rec['entry'] * 100)} · الوقف <code>{fmt(rec['sl'])}</code>\n\n"
+             f"{RLM}بعد النتائج قد يفتح السهم بفجوة كبيرة صعوداً أو هبوطاً، <b>والوقف لا يحمي من الفجوة</b>: "
+             "إذا افتتح تحت الوقف يكون الخروج بسعر الافتتاح.\n\n"
+             f"{RLM}خياراتك:\n"
+             f"{RLM}• تكمل الصفقة: اختبار الاستراتيجية شمل صفقات مرّت بالنتائج\n"
+             f"{RLM}• تخفّف الكمية لتقليل أثر الفجوة\n"
+             f"{RLM}• تخرج قبل النتائج وتنتظر توصية جديدة\n"
+             f"{RLM}البوت يكمل متابعة الصفقة بالطريقة العادية مهما اخترت.", reply_to=rec.get("msg"))
+
+
 # ---------------- المضاربة: الفحص اليومي ----------------
 REASON_AR = {
     "market": "السوق العام هابط", "no_trend": "تحت متوسط 200 يوم", "weak_rs": "ليس من أقوى 30%",
@@ -286,6 +322,7 @@ def daily_scan(st, spy):
         rec["msg"] = send(signal_text(rec), photo=chart_png(sym, cs_all[sym], rec))
         active[sym] = rec
         new.append(sym)
+    earnings_warnings(st, earn)
     st["market"] = {"spy_ok": mkt, "coins": status, "earn_ok": earn is not None}
     if new:
         st["last_signal"] = now_ms
@@ -405,6 +442,12 @@ def main():
              f"{RLM}• بدون أهداف ثابتة: الوقف يرتفع مع السعر، والبوت يخبرك بمكانه يومياً"
              + (f"\n\n{RLM}أُلغيت توصيات الاستراتيجية القديمة: {', '.join(old)}" if old else ""))
         st["breakout_v"] = True
+
+    if not st.get("v_earnwarn"):
+        send("🔧 <b>تحديث البوت</b>\n\n"
+             f"{RLM}• تنبيه قبل النتائج المالية بأيام لكل صفقة مفتوحة، مع خياراتك\n"
+             f"{RLM}• «فرصة استثمارية» صارت تشترط أن يكون السهم في تصحيح فعلي، لا مجرد بعيد عن قمته")
+        st["v_earnwarn"] = True
 
     now = datetime.now(timezone.utc)
     track(st)

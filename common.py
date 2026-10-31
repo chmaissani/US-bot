@@ -118,8 +118,9 @@ def _fail(ticker, why):
 
 
 def earnings_soon(days=EARNINGS_DAYS):
-    """الأسهم التي تعلن نتائجها خلال الأيام القادمة (من تقويم ناسداك). يرجع set أو None إذا فشل."""
-    found, ok = set(), False
+    """الأسهم التي تعلن نتائجها خلال الأيام القادمة (من تقويم ناسداك).
+    يرجع {رمز: (التاريخ YYYY-MM-DD، التوقيت)} أو None إذا فشل. التوقيت: pre / after / ""."""
+    found, ok = {}, False
     for d in range(days + 1):
         day = time.strftime("%Y-%m-%d", time.gmtime(time.time() + d * 86400))
         try:
@@ -127,7 +128,11 @@ def earnings_soon(days=EARNINGS_DAYS):
                              headers={**UA, "Accept": "application/json"}, timeout=15)
             rows = ((r.json().get("data") or {}).get("rows")) or []
             ok = ok or r.ok
-            found.update(x.get("symbol", "").upper() for x in rows)
+            for x in rows:
+                sym = x.get("symbol", "").upper()
+                tm = x.get("time", "")
+                when = "pre" if "pre" in tm else "after" if "after" in tm else ""
+                found.setdefault(sym, (day, when))
         except Exception:  # noqa: BLE001
             continue
     return found if ok else None
@@ -315,7 +320,9 @@ def invest_zone(s):
         return "down", info
     if (wr is not None and wr >= 75) or vs200 >= 30:
         return "hot", info
-    if slope_up and px >= 0.9 * s.sma200[i] and (-30 <= dd <= -8 or (wr is not None and wr <= 45)):
+    # التجميع يتطلب تصحيحاً فعلياً جارياً، لا مجرد بُعد عن القمة (سهم يرتد بقوة ليس فرصة تجميع)
+    pulling_back = (wr is not None and wr <= 50) or (s.sma50[i] is not None and px < s.sma50[i])
+    if slope_up and px >= 0.9 * s.sma200[i] and ((-30 <= dd <= -8 and pulling_back) or (wr is not None and wr <= 45)):
         return "buy", info
     return "hold", info
 
