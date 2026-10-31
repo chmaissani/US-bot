@@ -23,7 +23,8 @@
    "last": 1793390400000,
    "max_close": 159.34500122070312,
    "days": 6,
-   "now": 155.1199951171875
+   "now": 155.1199951171875,
+   "earn_warned": "2026-11-02"
   },
   "LLY": {
    "sym": "LLY",
@@ -42,6 +43,42 @@
    "status": "pending",
    "strategy": "breakout",
    "msg": 22
+  },
+  "REGN": {
+   "sym": "REGN",
+   "entry": 927.8900146484375,
+   "sl": 860.1500890523234,
+   "atr": 27.095970238445634,
+   "why": [
+    "أغلق عند أعلى مستوى في 50 يوماً (اختراق)",
+    "حجم التداول 4.5 ضعف المعتاد",
+    "من أقوى الأسهم: صعد +32% في 6 أشهر، أقوى من 86% من القائمة",
+    "السعر فوق متوسط 200 يوم، والسوق العام (SPY) صاعد",
+    "لا توجد نتائج مالية للشركة خلال الأيام القادمة"
+   ],
+   "t": 1793443957483,
+   "activate_after": 1793439000000,
+   "status": "pending",
+   "strategy": "breakout",
+   "msg": 28
+  },
+  "XOM": {
+   "sym": "XOM",
+   "entry": 187.25,
+   "sl": 177.32725373729627,
+   "atr": 3.9690985050814853,
+   "why": [
+    "أغلق عند أعلى مستوى في 50 يوماً (اختراق)",
+    "حجم التداول 1.9 ضعف المعتاد",
+    "من أقوى الأسهم: صعد +23% في 6 أشهر، أقوى من 72% من القائمة",
+    "السعر فوق متوسط 200 يوم، والسوق العام (SPY) صاعد",
+    "لا توجد نتائج مالية للشركة خلال الأيام القادمة"
+   ],
+   "t": 1793443957483,
+   "activate_after": 1793439000000,
+   "status": "pending",
+   "strategy": "breakout",
+   "msg": 29
   }
  },
  "history": [],
@@ -100,17 +137,16 @@
    "XYZ": "weak_rs",
    "DKNG": "no_trend",
    "RBLX": "no_trend",
-   "LLY": "signal",
    "NVO": "no_trend",
    "ISRG": "no_trend",
    "VRTX": "earnings",
-   "REGN": "earnings",
+   "REGN": "signal",
    "BA": "no_trend",
    "GE": "no_trend",
    "GEV": "no_trend",
    "CAT": "no_trend",
    "DE": "weak_rs",
-   "XOM": "earnings",
+   "XOM": "signal",
    "OXY": "weak_rs",
    "FCX": "no_trend",
    "NEM": "no_trend",
@@ -122,7 +158,7 @@
   },
   "earn_ok": true
  },
- "last_signal": 1793397520960,
+ "last_signal": 1793443957483,
  "invest_zones": {
   "AAPL": "hold",
   "MSFT": "hold",
@@ -137,18 +173,18 @@
   "V": "hold",
   "MA": "hold",
   "COST": "hold",
-  "WMT": "buy",
+  "WMT": "hold",
   "JNJ": "hold",
   "PG": "hold",
   "KO": "hold",
   "PEP": "down",
   "HD": "down",
   "MCD": "down",
-  "UNH": "buy",
+  "UNH": "hold",
   "ISRG": "down",
   "ADBE": "down",
   "ORCL": "down",
-  "TXN": "buy",
+  "TXN": "hold",
   "LIN": "hold",
   "SPGI": "hold",
   "BRK-B": "hold",
@@ -159,7 +195,7 @@
   "SPUS": "hold",
   "HLAL": "hold"
  },
- "scan_day": "2026-10-30",
+ "scan_day": "2026-10-31",
  "report_week": "2026-44",
  "v_earnwarn": true
 }
