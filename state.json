@@ -160,5 +160,6 @@
   "HLAL": "hold"
  },
  "scan_day": "2026-10-30",
- "report_week": "2026-44"
+ "report_week": "2026-44",
+ "v_earnwarn": true
 }
