@@ -20,7 +20,7 @@
    "strategy": "breakout",
    "msg": 7,
    "entry_t": 1792762200000,
-   "last": 1793739600000,
+   "last": 1793822829000,
    "max_close": 159.34500122070312,
    "days": 6,
    "now": 155.1199951171875,
@@ -44,7 +44,7 @@
    "strategy": "breakout",
    "msg": 22,
    "entry_t": 1793629800000,
-   "last": 1793739600000,
+   "last": 1793822876000,
    "max_close": 1393.1500244140625,
    "days": 0
   },
@@ -66,11 +66,13 @@
    "strategy": "breakout",
    "msg": 28,
    "entry_t": 1793629800000,
-   "last": 1793739600000,
+   "last": 1793822852000,
    "max_close": 927.219970703125,
    "days": 0
-  },
-  "XOM": {
+  }
+ },
+ "history": [
+  {
    "sym": "XOM",
    "entry": 183.97999572753906,
    "sl": 174.05724946483534,
@@ -84,18 +86,23 @@
    ],
    "t": 1793443957483,
    "activate_after": 1793439000000,
-   "status": "active",
+   "status": "closed",
    "strategy": "breakout",
    "msg": 29,
    "entry_t": 1793629800000,
-   "last": 1793739600000,
+   "last": 1793802600000,
    "max_close": 183.97999572753906,
-   "days": 0
+   "days": 0,
+   "exit": 174.05724946483534,
+   "why_close": "ضرب الوقف الأولي",
+   "closed_at": 1793822878090,
+   "res": -5.493383244447178
   }
- },
- "history": [],
+ ],
  "breakout_v": true,
- "last_close": {},
+ "last_close": {
+  "XOM": 1793822878090
+ },
  "market": {
   "spy_ok": true,
   "coins": {
