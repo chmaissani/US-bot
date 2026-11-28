@@ -212,7 +212,7 @@
   "GOOGL": "down",
   "AMZN": "buy",
   "NVDA": "down",
-  "META": "down",
+  "META": "hold",
   "AVGO": "down",
   "TSM": "hold",
   "ASML": "hold",
@@ -237,12 +237,12 @@
   "BRK-B": "hold",
   "ABBV": "hold",
   "MRK": "buy",
-  "SPY": "buy",
+  "SPY": "hold",
   "QQQ": "buy",
   "SPUS": "buy",
   "HLAL": "buy"
  },
  "scan_day": "2026-11-26",
- "report_week": "2026-47",
+ "report_week": "2026-48",
  "v_earnwarn": true
 }
